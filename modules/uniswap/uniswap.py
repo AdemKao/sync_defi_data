@@ -3,7 +3,6 @@ import asyncio
 import math
 import requests
 import os
-from dotenv import load_dotenv
 from web3 import Web3
 import json
 from types import SimpleNamespace
@@ -28,10 +27,10 @@ class UniSwap:
 
         self.graph = UniSwapGraphQL()
 
-    def generate_Dto(self, rewards, balances_data, graphOb):
+    def generate_dto(self, rewards, balances_data, graphOb):
         ethPriceUSD = graphOb["bundles"][0]["ethPriceUSD"]
         positions = graphOb["positions"]
-        Dto = []
+        dtos = []
         for index, reward in enumerate(rewards):
             token0 = positions[index]["token0"]
             token1 = positions[index]["token1"]
@@ -110,9 +109,9 @@ class UniSwap:
                 ],
                 "ethPriceUSD": ethPriceUSD
             }
-            Dto.append(_dto)
+            dtos.append(_dto)
 
-        return Dto
+        return dtos
 
     def get_ids_by_address(self, address):
         return self.graph.get_ids_by_address(address)
@@ -123,20 +122,7 @@ class UniSwap:
             (id, userAddr, self.MAX, self.MAX)).call()
         return data
 
-    async def async_get_collects_by_address(self, userAddr):
-        collected_data = []
-        graphOb = self.get_ids_by_address(userAddr)
-        # for nft in nfts:
-        #     collected_data.append(
-        #         asyncio.run(self.get_collect_by_id(int(nft["id"]), userAddr)))
-
-        # return collected_data
-        tasks = [self.async_get_collect_by_id(
-            int(position["id"]), userAddr) for position in graphOb["positions"]]
-        collected_data = await asyncio.gather(*tasks)
-        balances_data = self.get_tokens_balances(graphOb["positions"])
-        return self.generate_Dto(collected_data, balances_data, graphOb)
-        # return collected_data
+    # region calc amounts
 
     def get_tokens_balances(self, positions):
         balances = []
@@ -150,32 +136,6 @@ class UniSwap:
             balances.append(self.get_token_amounts(
                 liquidity, sqrt_price_x96, tick_low, tick_high, decimal0, decimal1))
         return balances
-
-    # For Out Side
-    def get_collects_by_address(self, userAddr):
-        loop = asyncio.get_event_loop()
-        collected_data = loop.run_until_complete(
-            self.async_get_collects_by_address(userAddr))
-        return collected_data
-
-    def _get_collect_by_id(self, id, userAddr):
-        # Collect get earn fees
-        data = self.contract.functions.collect(
-            (id, userAddr, self.MAX, self.MAX)).call()
-        return data
-
-    def _get_collects_by_address(self, userAddr):
-        collected_data = []
-        nfts = self.get_ids_by_address(userAddr)
-        for nft in nfts:
-            collected_data.append(
-                self._get_collect_by_id(int(nft["id"]), userAddr))
-
-        return collected_data
-
-    # TODO
-    def get_stake_by_address(self, userAddr):
-        return
 
     def get_tick_at_sqrt_price(self, sqrt_price_x96):
         tick = math.floor(
@@ -214,6 +174,47 @@ class UniSwap:
         # print("Amount Token0:", amount0_human)
         # print("Amount Token1:", amount1_human)
         return [amount0, amount1, amount0_human, amount1_human]
+    # endregion
+
+    # manager function
+    async def async_get_collects_by_address(self, userAddr):
+        collected_data = []
+        graphOb = self.get_ids_by_address(userAddr)
+        positions = graphOb["positions"]
+        tasks = [self.async_get_collect_by_id(
+            int(position["id"]), userAddr) for position in positions]
+        collected_data = await asyncio.gather(*tasks)
+        balances_data = self.get_tokens_balances(positions)
+        return self.generate_dto(collected_data, balances_data, graphOb)
+
+    # region sync function
+
+    def _get_collect_by_id(self, id, userAddr):
+        # Collect get earn fees
+        data = self.contract.functions.collect(
+            (id, userAddr, self.MAX, self.MAX)).call()
+        return data
+
+    def _get_collects_by_address(self, userAddr):
+        collected_data = []
+        nfts = self.get_ids_by_address(userAddr)
+        for nft in nfts:
+            collected_data.append(
+                self._get_collect_by_id(int(nft["id"]), userAddr))
+
+        return collected_data
+    # endregion
+
+    # For Out Side entry point
+    def get_collects_by_address(self, userAddr):
+        loop = asyncio.get_event_loop()
+        collected_data = loop.run_until_complete(
+            self.async_get_collects_by_address(userAddr))
+        return collected_data
+
+    # TODO
+    def get_stake_by_address(self, userAddr):
+        return
 
 
 class UniSwapGraphQL:
